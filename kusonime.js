@@ -14,6 +14,8 @@ class KusonimeScraper {
                     title: $element.find('.episodeye a').text().trim(),
                     link: $element.find('.episodeye a').attr('href'),
                     thumbnail: $element.find('.thumbz img').attr('src'),
+                    postedBy: $element.find('.fa-user').parent().text().replace('Posted by', '').trim(),
+                    releaseTime: $element.find('.fa-clock-o').parent().text().replace('Released on', '').trim(),
                     genres: $element.find('.fa-tag').parent().find('a').map((_, genre) => $(genre).text().trim()).get()
                 };
             }).get();
@@ -38,6 +40,11 @@ class KusonimeScraper {
                 }
             });
 
+            const synopsis = $('.lexot p').map((_, element) => {
+                const text = $(element).text().trim();
+                return (!text.includes('Released on') && !text.includes('Credit') && text.length > 0 && !text.includes(':')) ? text : null;
+            }).get().filter(Boolean);
+
             const downloadLinks = {};
             $('.smokeurlrh').each((_, element) => {
                 const $element = $(element);
@@ -54,8 +61,11 @@ class KusonimeScraper {
                 success: true,
                 data: {
                     title: $('.jdlz').text().trim(),
+                    thumbnail: $('.post-thumb img').attr('src') || $('.thumbz img').attr('src'),
+                    banner: $('.post-thumb img').attr('src'),
                     views: $('.viewoy').text().trim(),
                     info,
+                    synopsis,
                     downloadLinks
                 }
             };

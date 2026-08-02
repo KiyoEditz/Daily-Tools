@@ -1,0 +1,127 @@
+/**
+ * CLI Tool: styletext.js
+ * Converted from plugins/styletext.js
+ */
+
+const readline = require('readline');
+
+let fetch = require('node-fetch')
+let { JSDOM } = require('jsdom')
+let handler = async (m, { conn, text, usedPrefix }) => {
+  if (!text) throw `Ketik ${usedPrefix}style <teks>`
+  conn.reply(m.chat, Object.entries(await stylizeText(text ? text : m.quoted && m.quoted.text ? m.quoted.text : m.text)).map(([name, value]) => `*${name}*\n${value}`).join`\n\n`, m)
+}
+handler.help = ['style <teks>']
+handler.tags = ['maker']
+handler.command = /^(style)$/i
+handler.owner = false
+handler.mods = false
+handler.premium = false
+handler.group = false
+handler.private = false
+
+handler.admin = false
+handler.botAdmin = false
+
+handler.fail = null
+handler.exp = 0
+
+module.exports = handler
+
+async function stylizeText(text) {
+  let res = await fetch('http://qaz.wtf/u/convert.cgi?text=' + encodeURIComponent(text))
+  let html = await res.text()
+  let dom = new JSDOM(html)
+  let table = dom.window.document.querySelector('table').children[0].children
+  let obj = {}
+  for (let tr of table) {
+    let name = tr.querySelector('.aname').innerHTML
+    let content = tr.children[1].textContent.replace(/^\n/, '').replace(/\n$/, '')
+    obj[name + (obj[name] ? ' Reversed' : '')] = content
+  }
+  return obj
+}
+
+
+// Auto-generated CLI runner wrapper
+async function runCLI() {
+    const args = process.argv.slice(2);
+    const input = args.join(' ');
+    
+    // Create mock Baileys message & conn context for CLI execution
+    const mockConn = {
+        sendMessage: async (jid, content, options) => {
+            if (typeof content === 'string') {
+                console.log('\n[RESPONSE]', content);
+            } else if (content.text) {
+                console.log('\n[RESPONSE]', content.text);
+            } else if (content.caption) {
+                console.log('\n[CAPTION]', content.caption);
+                if (content.image) console.log('[IMAGE URL]', content.image.url || content.image);
+                if (content.video) console.log('[VIDEO URL]', content.video.url || content.video);
+                if (content.document) console.log('[DOC URL]', content.document.url || content.document);
+            } else {
+                console.log('\n[RESPONSE MEDIA/DATA]', content);
+            }
+            return { key: { id: 'cli_msg_id' } };
+        },
+        reply: async (jid, text, quoted) => {
+            console.log('\n[REPLY]', text);
+        },
+        sendFile: async (jid, url, filename, caption, quoted) => {
+            console.log(`\n[SEND FILE] ${filename}: ${url}`);
+            if (caption) console.log('[CAPTION]', caption);
+        }
+    };
+
+    const mockM = {
+        chat: 'cli@terminal',
+        key: { id: 'cli_key' },
+        sender: 'cli@user',
+        reply: (text) => console.log('\n[REPLY]', text),
+        quoted: null
+    };
+
+    let handlerFunc = typeof module.exports === 'function' ? module.exports : (typeof handler !== 'undefined' ? handler : null);
+
+    if (handlerFunc) {
+        console.log(`🚀 Running ${'styletext.js'} CLI...`);
+        if (!input) {
+            console.log('ℹ️ Usage: node "needs to check/styletext.js" <input_argument>');
+            const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+            rl.question('Masukkan input / query: ', async (userInput) => {
+                rl.close();
+                if (!userInput) return console.log('❌ Input cancelled.');
+                try {
+                    await handlerFunc(mockM, {
+                        conn: mockConn,
+                        args: userInput.split(' '),
+                        text: userInput,
+                        usedPrefix: '.',
+                        command: 'styletext'
+                    });
+                } catch (err) {
+                    console.error('❌ Error executing plugin:', err);
+                }
+            });
+        } else {
+            try {
+                await handlerFunc(mockM, {
+                    conn: mockConn,
+                    args: input.split(' '),
+                    text: input,
+                    usedPrefix: '.',
+                    command: 'styletext'
+                });
+            } catch (err) {
+                console.error('❌ Error executing plugin:', err);
+            }
+        }
+    } else {
+        console.log('ℹ️ Plugin file loaded successfully.');
+    }
+}
+
+if (require.main === module) {
+    runCLI();
+}
