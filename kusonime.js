@@ -73,19 +73,67 @@ class KusonimeScraper {
             return { success: false, data: null, error: error.message };
         }
     }
+
+    static async latest(page = 1) {
+        try {
+            const pageNum = parseInt(page, 10) || 1;
+            const url = pageNum > 1 ? `https://kusonime.com/page/${pageNum}/` : 'https://kusonime.com/';
+            const { data } = await axios.get(url, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+                }
+            });
+            const $ = cheerio.load(data);
+
+            const result = $('.kover').map((_, element) => {
+                const $element = $(element);
+                return {
+                    title: $element.find('.episodeye a').text().trim(),
+                    link: $element.find('.episodeye a').attr('href'),
+                    thumbnail: $element.find('.thumbz img').attr('src'),
+                    postedBy: $element.find('.fa-user').parent().text().replace('Posted by', '').trim(),
+                    releaseTime: $element.find('.fa-clock-o').parent().text().replace('Released on', '').trim(),
+                    genres: $element.find('.fa-tag').parent().find('a').map((_, genre) => $(genre).text().trim()).get()
+                };
+            }).get();
+
+            return { success: true, data: result };
+        } catch (error) {
+            return { success: false, data: [], error: error.message };
+        }
+    }
+
+    static async getLatest(page = 1) {
+        return this.latest(page);
+    }
 }
 
 // ==========================================
 // LOGIKA COMMAND LINE INTERFACE (CLI)
 // ==========================================
 async function runCLI() {
-    // Mengambil argumen dari terminal (melewati 'node' dan 'run.js')
+    // Mengambil argumen dari terminal (melewati 'node' dan 'kusonime.js')
     const args = process.argv.slice(2);
     const command = args[0];
     const query = args.slice(1).join(' ');
 
-    if (command === 'search') {
-        if (!query) return console.log('❌ Masukkan judul anime.\nContoh: node run.js search naruto');
+    if (command === 'latest') {
+        const page = parseInt(args[1], 10) || 1;
+        console.log(`⏳ Mengambil anime terbaru (Halaman ${page})...\n`);
+        const result = await KusonimeScraper.latest(page);
+
+        if (result.success && result.data.length > 0) {
+            result.data.forEach((anime, i) => {
+                console.log(`${i + 1}. ${anime.title}`);
+                console.log(`   Genre: ${anime.genres.length > 0 ? anime.genres.join(', ') : '-'}`);
+                console.log(`   URL  : ${anime.link}\n`);
+            });
+        } else {
+            console.log('❌ Gagal mengambil daftar anime terbaru.');
+        }
+
+    } else if (command === 'search') {
+        if (!query) return console.log('❌ Masukkan judul anime.\nContoh: node kusonime.js search naruto');
 
         console.log(`🔍 Mencari anime: "${query}"...\n`);
         const result = await KusonimeScraper.search(query);
@@ -101,7 +149,7 @@ async function runCLI() {
         }
 
     } else if (command === 'detail') {
-        if (!query) return console.log('❌ Masukkan URL dari kusonime.\nContoh: node run.js detail https://kusonime.com/...');
+        if (!query) return console.log('❌ Masukkan URL dari kusonime.\nContoh: node kusonime.js detail https://kusonime.com/...');
 
         console.log(`🔍 Mengambil detail dari: ${query}...\n`);
         const result = await KusonimeScraper.getDetail(query);
@@ -129,10 +177,15 @@ async function runCLI() {
 
     } else {
         console.log('💡 Cara Penggunaan:');
-        console.log('   Pencarian : node run.js search <judul>');
-        console.log('   Detail    : node run.js detail <url>');
+        console.log('   Terbaru   : node kusonime.js latest [halaman]');
+        console.log('   Pencarian : node kusonime.js search <judul>');
+        console.log('   Detail    : node kusonime.js detail <url>');
     }
 }
 
-// Menjalankan fungsi utama
-runCLI();
+module.exports = KusonimeScraper;
+
+if (require.main === module) {
+    // Menjalankan fungsi utama
+    runCLI();
+}

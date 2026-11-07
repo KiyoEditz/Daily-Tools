@@ -1,63 +1,172 @@
+const axios = require('axios');
+const crypto = require('crypto');
+
 class GDriveDirectLinker {
-    // 1. Masukkan semua UUID ke dalam Array
-    static uuids = [
-        '8ee94338-4d25-4f01-a79d-45ee6c48120e',
-        'c7729be6-1814-4b44-b2d6-11317046fa04',
-        '08686a5d-3c68-458a-a49e-01a3766d279a',
-        '21d69699-f877-4685-b7b5-8ff2672b54a7',
-        'feebeefb-5806-4411-870a-ac9604e2beac',
-        'd55e421f-4cdd-4d53-ba5f-af1b1e75dc46',
-        '71abc72f-bc6b-470b-8c82-eb1267cd2205',
-        '26461458-2f8f-46a5-9e2f-be5a3eef213f',
-        '0896272d-b1a4-488d-8f66-ef7381e87a2e'
-        //https://drive.usercontent.google.com/download?id=1-Bd4cVndwUrDWLDqjS6FTf-L3ax_RRTK&export=download&confirm=t&uuid=0896272d-b1a4-488d-8f66-ef7381e87a2e&at=ABswASYj_GOnPZ1Sck8iGX5JRWGY%3A1783050078303
-    ];
-
-    static generate(url) {
-        // 2. Ekstrak File ID dari URL Google Drive apa pun
-        const match = url.match(/[-\w]{25,}/);
-
-        if (!match) {
-            return { success: false, error: 'File ID tidak ditemukan di dalam URL.' };
+    /**
+     * Membuat UUID v4 secara otomatis tanpa perlu stock manual
+     */
+    static generateUuid() {
+        if (typeof crypto.randomUUID === 'function') {
+            return crypto.randomUUID();
         }
-        const fileId = match[0];
+        // Fallback generator UUID v4 standar RFC4122
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
 
-        // 3. Pilih salah satu UUID secara acak dari Array
-        const randomIndex = Math.floor(Math.random() * this.uuids.length);
-        const randomUuid = this.uuids[randomIndex];
+    /**
+     * Mengekstrak Google Drive File ID dari berbagai format URL
+     */
+    static extractFileId(url) {
+        if (!url) return null;
+        const trimmed = url.trim();
 
-        // 4. Rakit menjadi URL Direct Download sesuai template
-        const directLink = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t&uuid=${randomUuid}`;
+        // Jika input langsung berupa File ID
+        if (/^[-\w]{25,}$/.test(trimmed)) {
+            return trimmed;
+        }
 
-        // Mengembalikan data beserta informasi UUID mana yang terpakai
-        return { success: true, directLink, fileId, usedUuid: randomUuid };
+        // Format: /file/d/FILE_ID/view
+        const dMatch = trimmed.match(/\/file\/d\/([-\w]{25,})/i) || trimmed.match(/\/d\/([-\w]{25,})/i);
+        if (dMatch) return dMatch[1];
+
+        // Format query: ?id=FILE_ID atau &id=FILE_ID
+        const idMatch = trimmed.match(/[?&]id=([-\w]{25,})/i);
+        if (idMatch) return idMatch[1];
+
+        // Fallback match karakter alfanumerik panjang
+        const generalMatch = trimmed.match(/[-\w]{25,}/);
+        return generalMatch ? generalMatch[0] : null;
+    }
+
+    /**
+     * Merakit direct download link dengan UUID otomatis
+     */
+    static generate(url) {
+        const fileId = this.extractFileId(url);
+
+        if (!fileId) {
+            return {
+                success: false,
+                error: 'File ID tidak ditemukan di dalam URL.'
+            };
+        }
+
+        // Generate UUID otomatis secara dinamis
+        const uuid = this.generateUuid();
+
+        // Format direct download usercontent Google
+        const directLink = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t&uuid=${uuid}`;
+
+        return {
+            success: true,
+            fileId,
+            uuid,
+            directLink
+        };
+    }
+
+    /**
+     * Mengecek nama dan ukuran file langsung dari header Google Drive tanpa mengunduh isinya
+     */
+    static async getFileInfo(directLinkOrUrl) {
+        try {
+            const gen = directLinkOrUrl.includes('drive.usercontent.google.com')
+                ? { directLink: directLinkOrUrl }
+                : this.generate(directLinkOrUrl);
+
+            if (!gen.directLink) {
+                return { success: false, error: 'URL tidak valid.' };
+            }
+
+            const res = await axios.get(gen.directLink, {
+                responseType: 'stream',
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+                },
+                timeout: 10000
+            });
+
+            const disposition = res.headers['content-disposition'] || '';
+            const filenameMatch = disposition.match(/filename\*?=['"]?(?:UTF-\d['"]*)?([^;\r\n"']*)['"]?/i);
+            const fileName = filenameMatch ? decodeURIComponent(filenameMatch[1]) : 'Tidak diketahui';
+
+            const lengthBytes = parseInt(res.headers['content-length'] || '0', 10);
+            let fileSize = 'Tidak diketahui';
+            if (lengthBytes > 0) {
+                if (lengthBytes >= 1024 * 1024 * 1024) {
+                    fileSize = `${(lengthBytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+                } else {
+                    fileSize = `${(lengthBytes / (1024 * 1024)).toFixed(2)} MB`;
+                }
+            }
+
+            // Hancurkan stream seketika agar tidak membebani memori / bandwidth
+            res.data.destroy();
+
+            return {
+                success: true,
+                fileName,
+                fileSize,
+                bytes: lengthBytes
+            };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.message
+            };
+        }
     }
 }
 
 // ==========================================
 // LOGIKA COMMAND LINE INTERFACE (CLI)
 // ==========================================
-function runCLI() {
+async function runCLI() {
     const args = process.argv.slice(2);
     const url = args[0];
 
     if (!url) {
-        console.log('❌ Masukkan URL Google Drive.');
-        console.log('💡 Contoh: node gdrive.js https://drive.google.com/file/d/1-Bd4cVndwUrDWLDqjS6FTf-L3ax_RRTK/view');
+        console.log('💡 Cara Penggunaan:');
+        console.log('   node gdrive.js <url_atau_id_gdrive>');
+        console.log('\nContoh:');
+        console.log('   node gdrive.js https://drive.google.com/file/d/1-Bd4cVndwUrDWLDqjS6FTf-L3ax_RRTK/view');
+        console.log('   node gdrive.js 1-Bd4cVndwUrDWLDqjS6FTf-L3ax_RRTK');
         return;
     }
 
+    console.log('⏳ Mengurai URL & merakit direct link...\n');
     const result = GDriveDirectLinker.generate(url);
 
     if (result.success) {
-        console.log('✅ Berhasil merakit Direct Link!\n');
-        console.log(`📂 File ID   : ${result.fileId}`);
-        console.log(`🔄 UUID acak : ${result.usedUuid}`);
+        console.log('✅ Berhasil merakit Direct Link!');
+        console.log(`📂 File ID    : ${result.fileId}`);
+        console.log(`🔄 UUID Otomatis : ${result.uuid}`);
         console.log('\n🔗 Link Download:');
         console.log(result.directLink);
+
+        // Cek informasi file
+        process.stdout.write('\n🔍 Mengecek informasi file...');
+        const fileInfo = await GDriveDirectLinker.getFileInfo(result.directLink);
+        process.stdout.write('\r' + ' '.repeat(35) + '\r');
+
+        if (fileInfo.success) {
+            console.log('📄 Informasi File:');
+            console.log(`   - Nama File   : ${fileInfo.fileName}`);
+            console.log(`   - Ukuran File : ${fileInfo.fileSize}`);
+        } else {
+            console.log('ℹ️ Catatan: Metadata file tidak dapat dibaca langsung (kemungkinan butuh login / kuota limit Google).');
+        }
     } else {
         console.log(`\n❌ Gagal: ${result.error}`);
     }
 }
 
-runCLI();
+module.exports = GDriveDirectLinker;
+
+if (require.main === module) {
+    runCLI();
+}
